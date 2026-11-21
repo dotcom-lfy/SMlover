@@ -1,52 +1,71 @@
-# SMS-IYTS Cloudflare Worker deployment diagnostics
+# SMS-IYTS Cloudflare Worker internal testing
 
-This revision provides a reproducible Cloudflare Workers deployment and a small
-diagnostic page. It verifies the Worker runtime, static asset binding and a
-fixed outbound request to `https://example.com/`.
+This revision serves an internal SMS testing form from Cloudflare Workers
+Static Assets and sends validated requests through a fixed,
+administrator-configured SMS provider. Deployment diagnostics remain available
+as backend API routes and are not shown on the testing homepage.
 
-It does not expose a general-purpose proxy and does not execute the legacy list
-of third-party SMS endpoints.
-
-## Why the previous one-click deployment failed
-
-The old repository mixed three incompatible deployment paths:
-
-- `wrangler.toml` described a Worker with `index.js` as its entry point.
-- `wrangler.json` described only static assets and omitted the Worker entry.
-- GitHub Actions and `deploy.sh` deployed the repository as Cloudflare Pages.
-
-The repository root was also used as the static asset directory. As a result,
-the customer `workers.dev` deployment served `index.html`, source files,
-configuration files and a local credential-bearing test script as public
-assets, while the Worker request handler was not active.
+The legacy third-party endpoint list and general-purpose CORS proxy are not
+included.
 
 ## Project layout
 
 ```text
-index.js                  Worker entry point
-public/index.html         deployment diagnostic UI
-public/_headers           security and cache headers
-wrangler.toml             single authoritative deployment config
+index.js                  Worker API and provider adapter
+public/index.html         internal SMS testing form
+public/_headers           browser security and cache headers
+wrangler.toml             deployment, assets, rate limit and observability
 .github/workflows/        optional GitHub Actions deployment
 ```
 
 Only `public/` is uploaded as static content.
 
+## API routes
+
+- `POST /api/send` validates the phone number, message and recipient consent,
+  applies a per-recipient one-minute rate limit, and calls the configured
+  provider.
+- `GET /api/health` reports Worker and provider-configuration status.
+- `GET /api/outbound-check` performs the administrator outbound-network check.
+
+## SMS provider contract
+
+The Worker makes one HTTPS `POST` request to `SMS_PROVIDER_URL`:
+
+```json
+{
+  "to": "+8613812345678",
+  "message": "Message text",
+  "senderId": "SMS-IYTS"
+}
+```
+
+It sends `Authorization: Bearer <SMS_API_TOKEN>`. A provider response in the
+`200`–`299` range is treated as accepted.
+
+Configure production values without committing them:
+
+```bash
+wrangler secret put SMS_PROVIDER_URL
+wrangler secret put SMS_API_TOKEN
+wrangler secret put SMS_SENDER_ID
+```
+
+For local development, put the same names in an ignored `.dev.vars` file.
+
 ## Local verification
 
 ```bash
-npm install -g wrangler
-wrangler login
 wrangler dev --local --port 8787
 ```
 
-Open these paths:
+Verify:
 
-- `http://localhost:8787/`
-- `http://localhost:8787/api/health`
-- `http://localhost:8787/api/outbound-check`
-
-The two API endpoints must return HTTP 200 with `"ok": true`.
+- `http://localhost:8787/` shows the internal SMS testing form.
+- `GET /api/health` returns HTTP 200.
+- `POST /api/send` rejects invalid input.
+- Without provider secrets, valid input returns
+  `503 provider_not_configured` and does not contact an external service.
 
 ## Deploy
 
@@ -54,29 +73,18 @@ The two API endpoints must return HTTP 200 with `"ok": true`.
 wrangler deploy
 ```
 
-For GitHub Actions, configure these repository secrets:
+For GitHub Actions, configure:
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-Push to `main`, or run the `Deploy Cloudflare Worker` workflow manually.
-
-## Cloudflare Git integration
-
-Use Workers rather than Pages and configure:
-
-| Setting | Value |
-| --- | --- |
-| Production branch | `main` |
-| Build command | leave empty |
-| Deploy command | `npx wrangler deploy` |
-| Root directory | `/` |
+Workers Builds should use the `main` branch, repository root, no build command,
+and `npx wrangler deploy` as its deploy command.
 
 ## Required security action
 
 The old deployment publicly exposed a hard-coded credential in
-`test_anthropic.py`. Removing the file from the repository does not invalidate
-the exposed value. Rotate or revoke that credential in the service that issued
-it, then remove old Cloudflare deployments or versions that still contain it.
+`test_anthropic.py`. Removing the file does not invalidate the exposed value.
+Rotate or revoke that credential in the issuing service.
 
 See `SECURITY.md` for the repository rules used by this revision.
