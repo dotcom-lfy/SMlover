@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>SMS-IYTS 部署診斷</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #07111f; color: #e5eefb; }
+    main { width: min(680px, calc(100% - 32px)); padding: 28px; border: 1px solid #27405e; border-radius: 16px; background: #0d1b2d; box-shadow: 0 20px 60px #0008; }
+    h1 { margin-top: 0; font-size: 1.8rem; }
+    p { color: #aebfd4; line-height: 1.6; }
+    button { border: 0; border-radius: 10px; padding: 12px 18px; background: #37b3ff; color: #04111f; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: wait; }
+    pre { min-height: 150px; padding: 16px; overflow: auto; border-radius: 10px; background: #050b13; color: #b9f6ca; white-space: pre-wrap; }
+    .ok { color: #76e39c; }
+    .bad { color: #ff8c8c; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Cloudflare Worker 部署診斷</h1>
+    <p>此頁只驗證 Worker 路由、靜態資產綁定和安全的出站連線，不會觸發短信接口。</p>
+    <button id="run" type="button">執行自檢</button>
+    <p id="summary">尚未執行</p>
+    <pre id="result">等待測試…</pre>
+  </main>
+  <script>
+    const button = document.querySelector('#run');
+    const summary = document.querySelector('#summary');
+    const result = document.querySelector('#result');
+
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      summary.className = '';
+      summary.textContent = '正在檢查…';
+      result.textContent = '';
+
+      const report = {};
+      for (const endpoint of ['/api/health', '/api/outbound-check']) {
+        try {
+          const response = await fetch(endpoint, { cache: 'no-store' });
+          report[endpoint] = { status: response.status, body: await response.json() };
+        } catch (error) {
+          report[endpoint] = { error: error.message };
+        }
+      }
+
+      const passed = Object.values(report).every(item => item.status === 200 && item.body?.ok === true);
+      summary.className = passed ? 'ok' : 'bad';
+      summary.textContent = passed ? '自檢通過：Worker 與出站連線正常' : '自檢失敗：請查看下方結果';
+      result.textContent = JSON.stringify(report, null, 2);
+      button.disabled = false;
+    });
+  </script>
+</body>
+</html>
+
